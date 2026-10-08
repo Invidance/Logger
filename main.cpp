@@ -6,6 +6,7 @@
 #ifdef EXTRA_CODE
 #include <iostream>
 #include <chrono>
+#include <atomic>
 #endif
 
 /*
@@ -109,6 +110,61 @@ int main() {
             
 #endif // BASIC_LOGIC
 
+            });
+
+    }
+
+    {
+        // this test based on ownership of access
+        enum STATE {
+            PRELOAD,
+            WORKING,
+            WORKED
+        };
+
+        std::atomic<STATE> smthHappen(STATE::PRELOAD);
+
+		std::jthread sender([&smthHappen]() {
+            {
+				std::this_thread::sleep_for(std::chrono::microseconds(100));
+				
+				smthHappen.store(STATE::WORKING, std::memory_order_release);
+                smthHappen.notify_all();
+			}
+		});
+
+        std::jthread w1([&logger2, &smthHappen]() {
+            {
+				smthHappen.wait(STATE::PRELOAD, std::memory_order_acquire);
+				STATE expected = STATE::WORKING;
+                if (smthHappen.compare_exchange_strong(expected, STATE::WORKED))
+                {
+                    for (size_t i = 0; i < 10; i++)
+                    {
+                        std::this_thread::sleep_for(std::chrono::microseconds(10));
+                        logger2 << "hard task";
+                    }
+                }
+                else
+                    logger2 << "W1 lose";
+            }
+        });
+
+        std::jthread w2([&logger2, &smthHappen]() {
+            {
+                smthHappen.wait(STATE::PRELOAD, std::memory_order_acquire);
+                STATE expected = STATE::WORKING;
+                if (smthHappen.compare_exchange_strong(expected, STATE::WORKED))
+                {
+                    for (size_t i = 0; i < 10; i++)
+                    {
+                        std::this_thread::sleep_for(std::chrono::microseconds(10));
+                        logger2 << "hard task";
+                    }
+                }
+                else
+                    logger2 << "W2 lose";
+            }
             });
 
     }
